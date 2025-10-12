@@ -5,16 +5,106 @@ import (
   "fmt"
 )
 
+type WaitCond struct {
+	cond *sync.Cond
+	done func() bool
+}
+
+func NewWaitCond(done func() bool) WaitCond {
+	return WaitCond{
+		cond: sync.NewCond(&sync.Mutex{}),
+		done: done,
+	}
+}
+
+func (w *WaitCond) Broadcast() {
+	defer func() { recover() }()
+	w.cond.Broadcast()
+}
+
+func (w *WaitCond) Lock() {
+	defer func() { recover() }()
+	if w.done() {
+		w.Broadcast()
+	}
+	w.cond.L.Lock()
+}
+
+func (w *WaitCond) Unlock() {
+	defer func() { recover() }()
+	if w.done() {
+		w.Broadcast()
+	}
+	w.cond.L.Unlock()
+}
+
+func (w *WaitCond) Wait() {
+	defer func() { recover() }()
+	for !w.done() {
+		w.cond.Wait()
+	}
+	w.cond.Broadcast()
+}
+
+type Promise[T any] struct {
+	Channel chan T
+	Error   error
+	Done    *bool
+	Result  T
+	await   *sync.Once
+	cancel  *sync.Once
+	lock    *WaitCond
+}
+
+func NewPromise[T any](fn func() T) Promise[T] {
+	ch, err := GoChannel(fn)
+	p := Promise[T]{
+		Channel: ch,
+		Error:   err,
+		Done:    ptr(false),
+		await:   &sync.Once{},
+		cancel:  &sync.Once{},
+	}
+	p.lock = ptr(NewWaitCond(func() bool { return p.done() }))
+	return p
+}
+
+func (p *Promise[T]) done() bool {
+	return deref(p.Done)
+}
+
+func (p *Promise[T]) Await() *Promise[T] {
+
+	p.lock.Lock()
+	if p.done() {
+		p.lock.Unlock()
+		return p
+	}
+	p.await.Do(func() {
+		defer Close(p.Channel)
+		p.Result, p.Error = Receive(p.Channel)
+		*p.Done = true
+		p.lock.Broadcast()
+	})
+	p.lock.Wait()
+	p.lock.Unlock()
+	return p
+}
+
 // Type Safe, Thread Safe, nil Safe, reference Safe, wrapper for sync.Map
 type SyncMap[K comparable, V any] struct {
   syncMap *sync.Map
   localLock *sync.Mutex
+  waitInit *WaitCond
+  initDone bool
 }
 
 // This globalLock and init purely exist so that
 // SyncMap can safely be initialized without calling NewSyncMap
 // It's easier ergonomically easier but less efficient than NewSyncMap
 var globalLock sync.Mutex
+
+
 
 func (m *SyncMap[K, V]) init() {
   if m.syncMap == nil {
