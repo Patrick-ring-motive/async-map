@@ -2,7 +2,7 @@ package main
 
 import (
   "sync"
-  "fmt"
+  "log"
 )
 
 
@@ -106,7 +106,7 @@ func (m *SyncMap[K, V]) Range(fn func(key K, value V) bool) {
     (func(){
       defer func(){
         if r:= recover(); r != nil{
-          fmt.Println("SyncMap Range Panic: ", r)
+          log.Printf("SyncMap Range Panic: %+v", r)
         }
       }()
     typedKey, typedKeyOk := key.(K)
@@ -114,7 +114,7 @@ func (m *SyncMap[K, V]) Range(fn func(key K, value V) bool) {
     if typedKeyOk && typedValueOk {
       rtrn = fn(typedKey, typedValue)
     }else {
-      fmt.Println("SyncMap: Range assertion failed for key: ", key)
+      fmt.Printf("SyncMap: Range assertion failed for key: %+v", key)
     }
     })()
     return rtrn
