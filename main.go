@@ -59,6 +59,13 @@ func (m *SyncMap[K, V]) Load(key K) (V, bool) {
   return typedValue, (typedOk && ok && value != nil)
 }
 
+func (m *SyncMap[K, V]) Get(key K) V {
+	m.init()
+	value, _ := m.syncMap.Load(key)
+	typedValue := value.(V)
+	return typedValue
+}
+
 func (m *SyncMap[K, V]) LoadAndDelete(key K) (V, bool) {
   m.init()
   value, ok := m.syncMap.LoadAndDelete(key)
