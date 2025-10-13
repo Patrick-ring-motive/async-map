@@ -62,6 +62,9 @@ func (m *SyncMap[K, V]) Load(key K) (V, bool) {
 func (m *SyncMap[K, V]) Get(key K) V {
 	m.init()
 	value, _ := m.syncMap.Load(key)
+	if value == nil{
+		return new(V)
+	}
 	typedValue := value.(V)
 	return typedValue
 }
