@@ -61,11 +61,57 @@ func (m *SyncMap[K, V]) Load(key K) (V, bool) {
 
 func (m *SyncMap[K, V]) Get(key K) V {
 	m.init()
-	value, _ := m.syncMap.Load(key)
-	if value == nil{
-		return new(V)
+	value, ok := m.syncMap.Load(key)
+
+	// Check if the key was not found.
+	if !ok { 
+		var zero V // Declare a variable, which is initialized to the zero value of type V
+		return zero
 	}
-	typedValue := value.(V)
+
+	// The key was found, now check for nil values.
+	// This handles the case where a value was stored as a nil pointer/interface.
+	if value == nil {
+		var zero V
+		return zero
+	}
+
+	// Key was found and value is non-nil.
+	typedValue, typedOk := value.(V)
+	if !typedOk {
+		// This should ideally never happen in a well-typed wrapper, but good to handle.
+		var zero V
+		return zero 
+	}
+	
+	return typedValue
+}
+
+func (m *SyncMap[K, V]) GetOrDefault(key K, defaultValue ...V) V {
+	m.init()
+	var df V
+	if len(defaultValue) > 0 {
+		df = defaultValue[0]
+	}
+	value, ok := m.syncMap.Load(key)
+
+	// Check if the key was not found.
+	if !ok { 
+		return df
+	}
+
+	// The key was found, now check for nil values.
+	// This handles the case where a value was stored as a nil pointer/interface.
+	if value == nil {
+		return df
+	}
+
+	// Key was found and value is non-nil.
+	typedValue, typedOk := value.(V)
+	if !typedOk {
+		return df
+	}
+	
 	return typedValue
 }
 
