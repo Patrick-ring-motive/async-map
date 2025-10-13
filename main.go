@@ -163,7 +163,7 @@ func (m *SyncMap[K, V]) Range(fn func(key K, value V) bool) {
     if typedKeyOk && typedValueOk {
       rtrn = fn(typedKey, typedValue)
     }else {
-      fmt.Printf("SyncMap: Range assertion failed for key: %+v", key)
+      log.Printf("SyncMap: Range assertion failed for key: %+v", key)
     }
     })()
     return rtrn
