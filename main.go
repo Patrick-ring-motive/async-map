@@ -1,210 +1,67 @@
 package main
 
 import (
-  "sync"
-  "log"
+	"fmt"
+	"log"
+	"time"
+
+	"github.com/Patrick-ring-motive/async-map/asyncmap" // Replace 'github.com/youruser/async-map' with your actual module path
 )
 
-
-// Type Safe, Thread Safe, nil Safe, reference Safe, wrapper for sync.Map
-type SyncMap[K comparable, V any] struct {
-  syncMap *sync.Map
-  localLock *sync.Mutex
+// Example struct for demonstration
+type User struct {
+	ID   int
+	Name string
 }
 
-// This globalLock and init purely exist so that
-// SyncMap can safely be initialized without calling NewSyncMap
-// It's easier ergonomically easier but less efficient than NewSyncMap
-var globalLock sync.Mutex
+func main() {
+	log.Println("--- Testing asyncmap Package ---")
 
+	// 1. Initialization using NewSyncMap (Preferred, efficient)
+	log.Println("1. Initialize with NewSyncMap")
+	userMap := asyncmap.NewSyncMap[int, User](map[int]User{
+		101: {ID: 101, Name: "Alice"},
+		102: {ID: 102, Name: "Bob"},
+	})
 
-
-func (m *SyncMap[K, V]) init() {
-  if m.syncMap == nil {
-    globalLock.Lock()
-    defer globalLock.Unlock()
-    if m.syncMap == nil {
-      m.syncMap = &sync.Map{}
-      m.localLock = &sync.Mutex{}
-    }
-  }
-}
-
-func (m *SyncMap[K, V]) Clear() {
-  m.init()
-  m.localLock.Lock()
-  defer m.localLock.Unlock()
-  m.syncMap.Range(func(key, _ any) bool {
-    m.syncMap.Delete(key)
-    return true
-  })
-}
-
-func NewSyncMap[K comparable, V any](maps ...map[K]V) SyncMap[K, V] {
-  var sMap SyncMap[K, V]
-  sMap.syncMap = &sync.Map{}
-  sMap.localLock = &sync.Mutex{}
-  for _, m := range maps {
-    for key, value := range m {
-      sMap.Store(key, value)
-    }
-  }
-  return sMap
-}
-
-func (m *SyncMap[K, V]) Load(key K) (V, bool) {
-  m.init()
-  value, ok := m.syncMap.Load(key)
-  typedValue, typedOk := value.(V)
-  return typedValue, (typedOk && ok && value != nil)
-}
-
-func (m *SyncMap[K, V]) Get(key K) V {
-	m.init()
-	value, ok := m.syncMap.Load(key)
-
-	// Check if the key was not found.
-	if !ok { 
-		var zero V // Declare a variable, which is initialized to the zero value of type V
-		return zero
+	// 2. Testing Store and Load
+	userMap.Store(103, User{ID: 103, Name: "Charlie"})
+	if u, ok := userMap.Load(101); ok {
+		log.Printf("Loaded User 101: %+v\n", u)
 	}
 
-	// The key was found, now check for nil values.
-	// This handles the case where a value was stored as a nil pointer/interface.
-	if value == nil {
-		var zero V
-		return zero
-	}
+	// 3. Testing GetOrDefault
+	keyToFind := 104
+	defaultUser := User{ID: 999, Name: "Guest"}
+	uDefault := userMap.GetOrDefault(keyToFind, defaultUser)
+	log.Printf("GetOrDefault for key %d: %+v (Key was not found)\n", keyToFind, uDefault)
 
-	// Key was found and value is non-nil.
-	typedValue, typedOk := value.(V)
-	if !typedOk {
-		// This should ideally never happen in a well-typed wrapper, but good to handle.
-		var zero V
-		return zero 
-	}
+	// 4. Testing Zero-Value Initialization (lazyInit)
+	log.Println("4. Testing Zero-Value Initialization (Lazy Init)")
+	var settingsMap asyncmap.SyncMap[string, time.Duration]
+	settingsMap.Store("timeout", 5*time.Second) // This call triggers lazyInit
+	settingsVal := settingsMap.Get("timeout")
+	log.Printf("Lazy Init Test: Stored 'timeout', retrieved: %v\n", settingsVal)
+
+	// 5. Testing Range
+	log.Println("5. Testing Range (Iteration and Safety)")
+	userMap.Range(func(id int, user User) bool {
+		log.Printf("  Map Entry: ID=%d, Name=%s\n", id, user.Name)
+		return true
+	})
+
+	// 6. Demonstrate Merge and Transform
+	mapB := asyncmap.NewSyncMap[int, User](map[int]User{
+		102: {ID: 102, Name: "NewBob"}, // Overwrites existing
+		105: {ID: 105, Name: "Eve"},
+	})
+
+	mergedMap := asyncmap.Merge(userMap, mapB)
+	log.Printf("6. Merged Map Size: %d\n", len(mergedMap.ToMap()))
 	
-	return typedValue
+	// Transform map to string key/int value map
+	transformedMap := asyncmap.SyncTransform(userMap, func(k int, v User) (string, int) {
+		return fmt.Sprintf("User_%d", k), v.ID
+	})
+	log.Printf("7. Transformed Map Keys: %+v\n", transformedMap.ToMap())
 }
-
-func (m *SyncMap[K, V]) GetOrDefault(key K, defaultValue ...V) V {
-	m.init()
-	var df V
-	if len(defaultValue) > 0 {
-		df = defaultValue[0]
-	}
-	value, ok := m.syncMap.Load(key)
-
-	// Check if the key was not found.
-	if !ok { 
-		return df
-	}
-
-	// The key was found, now check for nil values.
-	// This handles the case where a value was stored as a nil pointer/interface.
-	if value == nil {
-		return df
-	}
-
-	// Key was found and value is non-nil.
-	typedValue, typedOk := value.(V)
-	if !typedOk {
-		return df
-	}
-	
-	return typedValue
-}
-
-func (m *SyncMap[K, V]) LoadAndDelete(key K) (V, bool) {
-  m.init()
-  value, ok := m.syncMap.LoadAndDelete(key)
-  typedValue, typedOk := value.(V)
-  return typedValue, (typedOk && ok && value != nil)
-}
-
-func (m *SyncMap[K, V]) Store(key K, value V) {
-  m.init()
-  m.syncMap.Store(key, value)
-}
-
-func (m *SyncMap[K, V]) LoadOrStore(key K, value V) (actual V, loaded bool) {
-  m.init()
-  v, ok := m.syncMap.LoadOrStore(key, value)
-  typedV, typeOk := v.(V)
-  return typedV, ok && typeOk
-}
-
-func (m *SyncMap[K, V]) Swap(key K, value V) (previous V, loaded bool) {
-  m.init()
-  v, ok := m.syncMap.Swap(key, value)
-  typedV, typeOk := v.(V)
-  return typedV, ok && typeOk
-}
-
-func (m *SyncMap[K, V]) Delete(key K) {
-  m.init()
-  m.syncMap.Delete(key)
-}
-
-func (m *SyncMap[K, V]) Range(fn func(key K, value V) bool) {
-  m.init()
-  m.localLock.Lock()
-  defer m.localLock.Unlock()
-  wrappedFn := func(key, value any) bool {
-    rtrn := true
-    (func(){
-      defer func(){
-        if r:= recover(); r != nil{
-          log.Printf("SyncMap Range Panic: %+v", r)
-        }
-      }()
-    typedKey, typedKeyOk := key.(K)
-    typedValue, typedValueOk := value.(V)
-    if typedKeyOk && typedValueOk {
-      rtrn = fn(typedKey, typedValue)
-    }else {
-      log.Printf("SyncMap: Range assertion failed for key: %+v", key)
-    }
-    })()
-    return rtrn
-  }
-  m.syncMap.Range(wrappedFn)
-}
-
-func (m *SyncMap[K, V]) ToMap() map[K]V {
-  mp := make(map[K]V)
-  m.Range(func(key K, value V) bool {
-    mp[key] = value
-    return true
-  })
-  return mp
-}
-
-func SyncTransform[K1, K2 comparable, V1, V2 any](m1 SyncMap[K1, V1], fn func(key K1, value V1) (K2, V2)) SyncMap[K2, V2] {
-  m2 := SyncMap[K2, V2]{}
-  m1.Range(func(key K1, value V1) bool {
-    k2, v2 := fn(key, value)
-    m2.Store(k2, v2)
-    return true
-  })
-  return m2
-}
-
-func (m *SyncMap[K, V]) Copy() SyncMap[K, V] {
-  return SyncTransform(*m, func(k K, v V) (K, V) { return k, v })
-}
-
-func Merge[K comparable, V any](a, b SyncMap[K, V]) SyncMap[K, V] {
-  out := SyncMap[K, V]{}
-  a.Range(func(k K, v V) bool {
-    out.Store(k, v)
-    return true
-  })
-  b.Range(func(k K, v V) bool {
-    out.Store(k, v)
-    return true
-  })
-  return out
-}
-
- 
